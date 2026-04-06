@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ingreso Retroalimentacion INS</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="login-body">
+  <main class="login-shell">
+    <section class="login-card">
+      <img src="IMAGE/encabezado.png" alt="Salud e Instituto Nacional de Salud" class="login-logo" />
+      <h1>Ingreso por correo autorizado</h1>
+      <p>Escribe el correo registrado en la hoja para consultar solo las instituciones asociadas.</p>
+
+      <form id="loginForm" class="login-form">
+        <label class="login-field">
+          <span>Correo autorizado</span>
+          <input type="email" id="emailInput" placeholder="correo@institucion.com" autocomplete="email" required />
+        </label>
+
+        <p class="login-help-note">En caso de no saber el correo, contacte via WhatsApp al <a href="https://wa.me/573178814432" target="_blank" rel="noopener noreferrer">3178814432</a>.</p>
+
+        <button type="submit" class="ghost-button login-button">Ingresar</button>
+        <p class="login-message" id="loginMessage">El acceso se valida contra Google Sheets al abrir el formulario.</p>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbycsH9xuacprLPkDHXFCbmbwyJN7jzg-YhRhGDrubfrvwm9mgHpRyhnCMaVa8ofgMgA/exec";
+    const form = document.getElementById("loginForm");
+    const emailInput = document.getElementById("emailInput");
+    const loginMessage = document.getElementById("loginMessage");
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const email = (emailInput.value || "").trim().toLowerCase();
+
+      if (!email) {
+        loginMessage.textContent = "Debes ingresar un correo.";
+        return;
+      }
+
+      loginMessage.textContent = "Validando correo autorizado...";
+
+      try {
+        const url = new URL(APPS_SCRIPT_URL);
+        url.searchParams.set("action", "validateEmail");
+        url.searchParams.set("email", email);
+        url.searchParams.set("t", Date.now().toString());
+
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          headers: { Accept: "application/json" }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Respuesta no valida: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (!payload.success || !payload.accessGranted) {
+          loginMessage.textContent = payload.message || "El correo no esta autorizado.";
+          return;
+        }
+
+        loginMessage.textContent = "Correo autorizado. Redirigiendo...";
+        window.location.href = `index.html?email=${encodeURIComponent(email)}`;
+      } catch (error) {
+        loginMessage.textContent = "No fue posible validar el correo en este momento.";
+      }
+    });
+  </script>
+</body>
+</html>

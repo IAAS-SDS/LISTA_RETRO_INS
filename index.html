@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Retroalimentacion INS</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="sheet-card">
+      <section class="access-banner" id="accessBanner">
+        <div class="access-banner-copy">
+          <strong>Acceso por correo autorizado</strong>
+          <span id="accessBannerText">Validando acceso...</span>
+        </div>
+        <a href="login.html" class="access-banner-link">Cambiar correo</a>
+      </section>
+
+      <header class="hero">
+        <img src="IMAGE/encabezado.png" alt="Salud e Instituto Nacional de Salud" class="hero-logo" />
+        <h1>RETROALIMENTACION CONTROL DE CALIDAD DE LAS BASES DE DATOS WHONET</h1>
+      </header>
+
+      <section class="meta-panel">
+        <div class="meta-board">
+          <div class="meta-labels">
+            <div class="meta-label-cell">DEPARTAMENTO</div>
+            <div class="meta-label-cell">MES DE NOTIFICACION</div>
+            <div class="meta-label-cell">No. UPGD QUE NOTIFICAN</div>
+            <div class="meta-label-cell">FECHA DE NOTIFICACION</div>
+            <div class="meta-label-cell">OPORTUNIDAD EN EL TIEMPO DE NOTIFICACION</div>
+          </div>
+          <div class="meta-values">
+            <div class="meta-value-cell" id="metaDepartamento">Cargando...</div>
+            <div class="meta-value-cell" id="metaMes">Cargando...</div>
+            <div class="meta-value-cell" id="metaUpgd">Cargando...</div>
+            <div class="meta-value-cell" id="metaFecha">Cargando...</div>
+            <div class="meta-value-cell" id="metaOportunidad">Cargando...</div>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <label class="searchbox searchbox-sheet">
+            <span>Hoja / mes</span>
+            <select id="sheetSelect"></select>
+          </label>
+          <label class="searchbox">
+            <span>Buscar institucion</span>
+            <input type="search" id="searchInput" placeholder="Escribe una institucion..." />
+          </label>
+          <button type="button" class="ghost-button" id="btnRecargar">Recargar datos</button>
+        </div>
+
+        <div class="status-strip">
+          <span class="status-badge" id="backendBadge">Modo local</span>
+          <p id="statusMessage">Preparando informacion...</p>
+        </div>
+      </section>
+
+      <section class="table-panel">
+        <div class="table-scroll">
+          <table class="retro-table">
+            <thead>
+              <tr>
+                <th>Institucion</th>
+                <th>Retroalimentacion de las variables a evaluar</th>
+                <th>Observaciones de las UPGD</th>
+                <th>Url soporte</th>
+                <th class="col-acciones">Guardar</th>
+              </tr>
+            </thead>
+            <tbody id="tablaRetroBody">
+              <tr>
+                <td colspan="5" class="empty-state">Cargando registros...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
