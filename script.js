@@ -1,5 +1,5 @@
 const CONFIG = {
-  appsScriptUrl: "https://script.google.com/macros/s/AKfycbycsH9xuacprLPkDHXFCbmbwyJN7jzg-YhRhGDrubfrvwm9mgHpRyhnCMaVa8ofgMgA/exec",
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbxOs6vsPYrvr7Blmv2Gf3mTfb6DFxcAIQLdwzkJoJAlR--PkfKBouArSYk0iU9uTRRy/exec",
   localStorageKey: "retro-ins-observaciones-v1",
   maxUploadSizeMb: 10,
   allowedUploadExtensions: [
@@ -16,7 +16,7 @@ const CONFIG = {
   // Configura aqui hasta que fecha se puede editar cada hoja.
   // Formato: YYYY-MM-DD
   editDeadlines: {
-    ENERO_2026: "2026-05-15",
+    ENERO_2026: "2026-04-17",
     FEBRERO_2026: "2026-03-15",
     MARZO_2026: "2026-04-15",
     ABRIL_2026: "2026-05-15",
