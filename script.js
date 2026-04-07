@@ -1,5 +1,5 @@
 const CONFIG = {
-  appsScriptUrl: "https://script.google.com/macros/s/AKfycbxOs6vsPYrvr7Blmv2Gf3mTfb6DFxcAIQLdwzkJoJAlR--PkfKBouArSYk0iU9uTRRy/exec",
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbw1B0j0hnN1yEy_S0wYzFTfKZNCGM7m90iBJ8SyvLDw8T0mP__CZarFhbNKsbD91ow2/exec",
   localStorageKey: "retro-ins-observaciones-v1",
   maxUploadSizeMb: 10,
   allowedUploadExtensions: [

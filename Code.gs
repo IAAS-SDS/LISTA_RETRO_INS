@@ -206,7 +206,7 @@ function buildDataset_(sheetName, email) {
     return {
       success: true,
       accessDenied: true,
-      message: `El correo ${normalizedEmail} no tiene instituciones asignadas en ${activeSheetName}.`,
+      message: `El correo ${normalizedEmail} no cuenta con acceso.`,
       metadata: {
         activeSheetName,
         departamento: sheet.getRange(META_MAP.departamento).getDisplayValue(),
@@ -270,7 +270,7 @@ function validateEmailAccess_(email) {
     return {
       success: true,
       accessGranted: false,
-      message: `El correo ${normalizedEmail} no aparece en el listado autorizado.`
+      message: `El correo ${normalizedEmail} no cuenta con acceso.`
     };
   }
 
