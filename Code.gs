@@ -118,13 +118,14 @@ function saveObservation_(payload) {
   assertRowEmailAuthorized_(sheet, rowNumber, email);
 
   sheet.getRange(rowNumber, 3).setValue(payload.observation || "");
+  sheet.getRange(rowNumber, 4).setValue(payload.labResponse || "");
 
   return jsonOutput({
     success: true,
-    message: "Observacion guardada correctamente.",
+    message: "Informacion guardada correctamente.",
     rowNumber,
     activeSheetName: getSheetName_(sheetName),
-    supportUrl: sheet.getRange(rowNumber, 4).getDisplayValue()
+    supportUrl: sheet.getRange(rowNumber, 5).getDisplayValue()
   });
 }
 
@@ -159,7 +160,7 @@ function uploadSupport_(payload) {
   const file = monthFolder.createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  sheet.getRange(rowNumber, 4).setValue(file.getUrl());
+  sheet.getRange(rowNumber, 5).setValue(file.getUrl());
 
   return jsonOutput({
     success: true,
@@ -178,7 +179,7 @@ function buildDataset_(sheetName, email) {
   const totalRows = Math.max(lastRow - DATA_START_ROW + 1, 0);
 
   const values = totalRows > 0
-    ? sheet.getRange(DATA_START_ROW, 1, totalRows, 5).getDisplayValues()
+    ? sheet.getRange(DATA_START_ROW, 1, totalRows, 6).getDisplayValues()
     : [];
 
   const normalizedEmail = normalizeEmail_(email);
@@ -190,11 +191,12 @@ function buildDataset_(sheetName, email) {
       institution: row[0] || "",
       feedback: row[1] || "",
       observation: row[2] || "",
-      supportUrl: row[3] || "",
-      supportName: row[3] ? "Soporte cargado" : "",
-      authorizedEmail: row[4] || ""
+      labResponse: row[3] || "",
+      supportUrl: row[4] || "",
+      supportName: row[4] ? "Soporte cargado" : "",
+      authorizedEmail: row[5] || ""
     }))
-    .filter(row => row.institution || row.feedback || row.observation || row.supportUrl || row.authorizedEmail);
+    .filter(row => row.institution || row.feedback || row.observation || row.labResponse || row.supportUrl || row.authorizedEmail);
 
   const rows = isAdmin
     ? baseRows
@@ -293,7 +295,7 @@ function assertRowEmailAuthorized_(sheet, rowNumber, email) {
     return;
   }
 
-  const authorizedCell = sheet.getRange(rowNumber, 5).getDisplayValue();
+  const authorizedCell = sheet.getRange(rowNumber, 6).getDisplayValue();
   if (!isAuthorizedForRow_(authorizedCell, normalizedEmail)) {
     throw new Error("El correo no tiene permiso para modificar esta institucion.");
   }

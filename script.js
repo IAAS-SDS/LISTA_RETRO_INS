@@ -1,5 +1,5 @@
 const CONFIG = {
-  appsScriptUrl: "https://script.google.com/macros/s/AKfycbw1B0j0hnN1yEy_S0wYzFTfKZNCGM7m90iBJ8SyvLDw8T0mP__CZarFhbNKsbD91ow2/exec",
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbyReu58CxkqXEiig1cuhF0i2ZVrMn-PPCTtgGxQoXUY7JUx6cQizn0hNj06Es8szoQ/exec",
   localStorageKey: "retro-ins-observaciones-v1",
   maxUploadSizeMb: 10,
   allowedUploadExtensions: [
@@ -217,13 +217,16 @@ function normalizeRows(rows) {
     institution: (row.institution || "").trim(),
     feedback: (row.feedback || "").trim(),
     observation: row.observation || "",
+    labResponse: row.labResponse || "",
     supportUrl: row.supportUrl || "",
     supportName: row.supportName || "",
     selectedFileName: "",
     supportMessage: "",
     isSaving: false,
     isUploading: false,
-    statusText: row.observation ? "Observacion cargada." : "Sin observacion registrada."
+    isGeneratingPdf: false,
+    observationStatusText: getSavedFieldStatusText(row.observation),
+    labResponseStatusText: getSavedFieldStatusText(row.labResponse)
   }));
 }
 
@@ -262,7 +265,8 @@ function renderRows() {
 
   const html = state.filteredRows.map(row => {
     const saveLabel = state.editingLocked ? "Bloqueado" : row.isSaving ? "Guardando..." : "Guardar";
-    const statusClass = row.isSaving ? "pending" : row.observation.trim() ? "success" : "";
+    const observationStatusClass = getFieldStatusClass(row.observationStatusText, row.observation);
+    const labResponseStatusClass = getFieldStatusClass(row.labResponseStatusText, row.labResponse);
     const supportInputId = getSupportInputId(row);
 
     return `
@@ -271,14 +275,26 @@ function renderRows() {
         <td class="cell-feedback">${escapeHtml(row.feedback).replace(/\n/g, "<br>")}</td>
         <td class="cell-observation">
           <textarea
-            class="row-observation"
+            class="row-textarea row-observation"
             data-role="observation"
             data-row-key="${escapeHtml(getRowKey(row))}"
             placeholder="Escribe aqui las observaciones de la UPGD..."
             ${state.editingLocked ? "disabled" : ""}
           >${escapeHtml(row.observation)}</textarea>
-          <div class="row-status ${statusClass}" data-role="status" data-row-key="${escapeHtml(getRowKey(row))}">
-            ${escapeHtml(state.editingLocked ? `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.` : row.statusText)}
+          <div class="row-status ${observationStatusClass}" data-role="observationStatus" data-row-key="${escapeHtml(getRowKey(row))}">
+            ${escapeHtml(state.editingLocked ? `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.` : row.observationStatusText)}
+          </div>
+        </td>
+        <td class="cell-lab-response">
+          <textarea
+            class="row-textarea row-lab-response"
+            data-role="labResponse"
+            data-row-key="${escapeHtml(getRowKey(row))}"
+            placeholder="Escribe aqui las observaciones de laboratorio..."
+            ${state.editingLocked ? "disabled" : ""}
+          >${escapeHtml(row.labResponse)}</textarea>
+          <div class="row-status ${labResponseStatusClass}" data-role="labResponseStatus" data-row-key="${escapeHtml(getRowKey(row))}">
+            ${escapeHtml(state.editingLocked ? `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.` : row.labResponseStatusText)}
           </div>
         </td>
         <td class="cell-support">
@@ -311,8 +327,15 @@ function renderRows() {
               class="support-button"
               data-role="upload"
               data-row-key="${escapeHtml(getRowKey(row))}"
-              ${row.isUploading || state.editingLocked ? "disabled" : ""}
+              ${row.isUploading || row.isGeneratingPdf || state.editingLocked ? "disabled" : ""}
             >${row.isUploading ? "Subiendo..." : "Subir soporte"}</button>
+            <button
+              type="button"
+              class="support-button support-button-secondary"
+              data-role="generatePdf"
+              data-row-key="${escapeHtml(getRowKey(row))}"
+              ${row.isGeneratingPdf || row.isUploading || state.editingLocked ? "disabled" : ""}
+            >${row.isGeneratingPdf ? "Generando..." : "Generar PDF"}</button>
             ${row.supportUrl ? `<div class="support-badge">Soporte cargado</div>` : ""}
             <div class="support-error" data-row-key="${escapeHtml(getRowKey(row))}" style="${row.supportMessage ? "" : "display:none;"}">${escapeHtml(row.supportMessage || "")}</div>
           </div>
@@ -342,6 +365,10 @@ function bindRowEvents() {
 
   els.tablaRetroBody.querySelectorAll('[data-role="upload"]').forEach(button => {
     button.addEventListener("click", () => uploadSupport(button.dataset.rowKey));
+  });
+
+  els.tablaRetroBody.querySelectorAll('[data-role="generatePdf"]').forEach(button => {
+    button.addEventListener("click", () => generatePdfSupport(button.dataset.rowKey));
   });
 
   els.tablaRetroBody.querySelectorAll('[data-role="file"]').forEach(input => {
@@ -380,9 +407,24 @@ function bindRowEvents() {
       }
 
       row.observation = event.target.value;
-      row.statusText = "Cambios pendientes por guardar.";
+      row.observationStatusText = "Cambios pendientes por guardar.";
       syncFilteredRow(row);
-      updateRowStatus(row, "pending");
+      updateFieldStatus(row, "observation", "pending");
+      autoResizeTextarea(textarea);
+    });
+  });
+
+  els.tablaRetroBody.querySelectorAll('[data-role="labResponse"]').forEach(textarea => {
+    textarea.addEventListener("input", event => {
+      const row = state.rows.find(item => getRowKey(item) === textarea.dataset.rowKey);
+      if (!row) {
+        return;
+      }
+
+      row.labResponse = event.target.value;
+      row.labResponseStatusText = "Cambios pendientes por guardar.";
+      syncFilteredRow(row);
+      updateFieldStatus(row, "labResponse", "pending");
       autoResizeTextarea(textarea);
     });
   });
@@ -404,7 +446,7 @@ function handleSearch(event) {
   }
 
   state.filteredRows = state.rows.filter(row => {
-    const joined = `${row.institution} ${row.feedback} ${row.observation}`.toLowerCase();
+    const joined = `${row.institution} ${row.feedback} ${row.observation} ${row.labResponse}`.toLowerCase();
     return joined.includes(query);
   });
 
@@ -423,7 +465,8 @@ async function saveRow(rowKey) {
   }
 
   row.isSaving = true;
-  row.statusText = "Guardando cambios...";
+  row.observationStatusText = "Guardando cambios...";
+  row.labResponseStatusText = "Guardando cambios...";
   syncFilteredRow(row);
   renderRows();
 
@@ -434,10 +477,12 @@ async function saveRow(rowKey) {
       saveObservationLocal(row);
     }
 
-    row.statusText = "Observacion guardada correctamente.";
+    row.observationStatusText = getSavedFieldStatusText(row.observation);
+    row.labResponseStatusText = getSavedFieldStatusText(row.labResponse);
   } catch (error) {
     console.error("Error guardando observacion:", error);
-    row.statusText = "No se pudo guardar la observacion.";
+    row.observationStatusText = "No se pudo guardar la informacion.";
+    row.labResponseStatusText = "No se pudo guardar la informacion.";
   } finally {
     row.isSaving = false;
     syncFilteredRow(row);
@@ -457,7 +502,8 @@ async function saveObservationRemote(row) {
       email: state.authorizedEmail,
       rowNumber: row.rowNumber,
       institution: row.institution,
-      observation: row.observation
+      observation: row.observation,
+      labResponse: row.labResponse
     })
   });
 
@@ -477,7 +523,10 @@ async function saveObservationRemote(row) {
 
 function saveObservationLocal(row) {
   const savedMap = getLocalObservationMap();
-  savedMap[getRowKey(row)] = row.observation;
+  savedMap[getRowKey(row)] = {
+    observation: row.observation,
+    labResponse: row.labResponse
+  };
   localStorage.setItem(getLocalStorageKey(), JSON.stringify(savedMap));
 }
 
@@ -657,13 +706,718 @@ function formatDeadlineForDisplay(deadline) {
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
 
-function updateRowStatus(row, className) {
-  const statusNode = els.tablaRetroBody.querySelector(`[data-role="status"][data-row-key="${CSS.escape(getRowKey(row))}"]`);
+function getSavedFieldStatusText(value) {
+  return String(value || "").trim() ? "Informacion cargada." : "Sin informacion registrada.";
+}
+
+async function generatePdfSupport(rowKey) {
+  if (state.editingLocked) {
+    setScreenStatus(`Edicion deshabilitada para ${formatSheetLabel(state.currentSheetName)}. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.`);
+    return;
+  }
+
+  const row = state.rows.find(item => getRowKey(item) === rowKey);
+  if (!row) {
+    return;
+  }
+
+  row.isGeneratingPdf = true;
+  row.supportMessage = "Generando PDF de soporte...";
+  syncFilteredRow(row);
+  renderRows();
+
+  try {
+    const currentRow = getCurrentRowValues(row);
+    Object.assign(row, currentRow);
+    const fileName = buildPdfFileName(row);
+    await downloadSupportPdfFromCurrentPage(row, fileName);
+    row.supportName = fileName;
+    row.selectedFileName = row.supportName;
+    row.supportMessage = "PDF generado y descargado.";
+    setScreenStatus(`PDF descargado para ${row.institution}.`);
+  } catch (error) {
+    console.error("Error generando PDF:", error);
+    row.supportMessage = error.message || "No fue posible generar el PDF.";
+  } finally {
+    row.isGeneratingPdf = false;
+    syncFilteredRow(row);
+    renderRows();
+  }
+}
+
+function getCurrentRowValues(row) {
+  const rowKey = getRowKey(row);
+  const observationNode = els.tablaRetroBody.querySelector(`[data-role="observation"][data-row-key="${CSS.escape(rowKey)}"]`);
+  const labResponseNode = els.tablaRetroBody.querySelector(`[data-role="labResponse"][data-row-key="${CSS.escape(rowKey)}"]`);
+
+  return {
+    ...row,
+    observation: observationNode ? observationNode.value : row.observation,
+    labResponse: labResponseNode ? labResponseNode.value : row.labResponse
+  };
+}
+
+function buildPdfFileName(row) {
+  const baseName = `soporte_${state.currentSheetName}_${row.institution || "institucion"}_${row.rowNumber}`;
+  return `${sanitizeFileName(baseName)}.pdf`;
+}
+
+async function downloadSupportPdfFromCurrentPage(row, fileName) {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    throw new Error("No se cargo la libreria para descargar PDF. Revisa la conexion a internet e intenta nuevamente.");
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "letter", orientation: "portrait" });
+  await renderSupportPdf(doc, row, fileName);
+  doc.save(fileName);
+}
+
+function cleanupPrintableSupport() {
+  document.body.classList.remove("printing-support");
+  const existingPrintArea = document.getElementById("printSupportArea");
+  if (existingPrintArea) {
+    existingPrintArea.remove();
+  }
+  const existingPrintStyle = document.getElementById("printSupportStyle");
+  if (existingPrintStyle) {
+    existingPrintStyle.remove();
+  }
+}
+
+async function renderSupportPdf(doc, row, fileName) {
+  const metadata = state.metadata || {};
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 28;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  doc.setDrawColor(31, 59, 99);
+  doc.setLineWidth(1.3);
+  doc.rect(margin, y, contentWidth, pageHeight - margin * 2);
+
+  const logoDataUrl = await getImageDataUrl("IMAGE/encabezado.png");
+  if (logoDataUrl) {
+    doc.addImage(logoDataUrl, "PNG", margin + 115, y + 12, 330, 82);
+    y += 106;
+  } else {
+    y += 18;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text("RETROALIMENTACIÓN CONTROL DE CALIDAD DE LAS BASES DE DATOS", pageWidth / 2, y, { align: "center" });
+  doc.text("WHONET", pageWidth / 2, y + 14, { align: "center" });
+  y += 32;
+
+  y = drawMetadataTable(doc, metadata, margin + 12, y, contentWidth - 24);
+  y += 10;
+
+  y = drawFeedbackTable(doc, row, margin + 12, y, contentWidth - 24, pageHeight - margin);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(80, 80, 80);
+  doc.text(`Archivo sugerido: ${fileName} | Generado: ${formatPdfDate(new Date())}`, pageWidth - margin - 12, pageHeight - margin - 8, { align: "right" });
+}
+
+function drawMetadataTable(doc, metadata, x, y, width) {
+  const labels = [
+    "DEPARTAMENTO",
+    "MES DE NOTIFICACIÓN",
+    "NO. UPGD QUE NOTIFICAN",
+    "FECHA DE NOTIFICACIÓN",
+    "OPORTUNIDAD EN EL TIEMPO DE NOTIFICACIÓN"
+  ];
+  const values = [
+    metadata.departamento || "Sin dato",
+    metadata.mesNotificacion || "Sin dato",
+    metadata.numeroUpgd || "Sin dato",
+    metadata.fechaNotificacion || "Sin dato",
+    metadata.oportunidad || "Sin dato"
+  ];
+  const labelWidth = width * 0.32;
+  const valueWidth = width - labelWidth;
+  const rowHeight = 18;
+
+  doc.setLineWidth(0.7);
+  labels.forEach((label, index) => {
+    const rowY = y + index * rowHeight;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, rowY, labelWidth, rowHeight, "FD");
+    doc.setFillColor(169, 196, 230);
+    doc.rect(x + labelWidth, rowY, valueWidth, rowHeight, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.2);
+    doc.setTextColor(0, 0, 0);
+    doc.text(wrapPdfLine(doc, label, labelWidth - 8), x + labelWidth / 2, rowY + 11, { align: "center" });
+    doc.text(wrapPdfLine(doc, values[index], valueWidth - 8), x + labelWidth + valueWidth / 2, rowY + 11, { align: "center" });
+  });
+
+  return y + labels.length * rowHeight;
+}
+
+function drawFeedbackTable(doc, row, x, y, width, bottomLimit) {
+  const columns = [
+    { title: "INSTITUCIÓN", value: row.institution || "Sin dato", width: width * 0.19 },
+    { title: "RETROALIMENTACIÓN DE LAS VARIABLES A EVALUAR", value: row.feedback || "Sin información registrada.", width: width * 0.31 },
+    { title: "OBSERVACIONES DE LAS UPGD", value: row.observation || "Sin información registrada.", width: width * 0.25 },
+    { title: "OBSERVACIONES DE LABORATORIO", value: row.labResponse || "Sin información registrada.", width: width * 0.25 }
+  ];
+  const headerHeight = 28;
+  const bodyMinHeight = 96;
+  const bodyY = y + headerHeight;
+  const bodyHeight = Math.max(bodyMinHeight, bottomLimit - bodyY - 22);
+  let currentX = x;
+
+  doc.setLineWidth(0.7);
+  columns.forEach(column => {
+    doc.setFillColor(22, 57, 98);
+    doc.rect(currentX, y, column.width, headerHeight, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.3);
+    doc.setTextColor(255, 255, 255);
+    const titleLines = doc.splitTextToSize(column.title, column.width - 8);
+    doc.text(titleLines, currentX + column.width / 2, y + 10, { align: "center" });
+
+    doc.setFillColor(255, 255, 255);
+    doc.rect(currentX, bodyY, column.width, bodyHeight, "FD");
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.4);
+    doc.setTextColor(0, 0, 0);
+    const textLines = doc.splitTextToSize(String(column.value), column.width - 8);
+    doc.text(textLines, currentX + 4, bodyY + 11);
+    currentX += column.width;
+  });
+
+  return bodyY + bodyHeight;
+}
+
+function wrapPdfLine(doc, text, maxWidth) {
+  const lines = doc.splitTextToSize(String(text || ""), maxWidth);
+  return lines.length > 1 ? lines : String(text || "");
+}
+
+async function getImageDataUrl(path) {
+  try {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.src = new URL(path, window.location.href).href;
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch (error) {
+    console.warn("No fue posible cargar el encabezado para el PDF:", error);
+    return "";
+  }
+}
+
+function buildPrintableSupportMarkup(row, fileName) {
+  const metadata = state.metadata || {};
+  const generatedAt = formatPdfDate(new Date());
+  const logoUrl = new URL("IMAGE/encabezado.png", window.location.href).href;
+
+  return `
+    <style id="printSupportStyle">
+      @page {
+        size: letter;
+        margin: 8mm;
+      }
+
+      #printSupportArea,
+      #printSupportArea * {
+        box-sizing: border-box;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      #printSupportArea {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 999999;
+        width: 760px;
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #fff;
+        color: #000;
+        font-size: 10.5px;
+        line-height: 1.25;
+        box-shadow: 0 0 0 9999px #fff;
+      }
+
+      body.printing-support {
+        overflow: hidden;
+      }
+
+      body.printing-support > :not(#printSupportArea):not(#printSupportStyle) {
+        visibility: hidden;
+      }
+
+      #printSupportArea .sheet-card {
+        width: 100%;
+        max-width: 100%;
+        border: 2px solid #1f3b63;
+        background: #fff;
+        overflow: hidden;
+      }
+
+      #printSupportArea .hero {
+        padding: 8px 10px 6px;
+        background: #fff;
+      }
+
+      #printSupportArea .hero-logo {
+        display: block;
+        max-width: 430px;
+        width: 100%;
+        height: auto;
+        margin: 0 auto 6px;
+        object-fit: contain;
+      }
+
+      #printSupportArea .hero h1 {
+        margin: 0;
+        color: #000;
+        font-size: 14px;
+        line-height: 1.25;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      #printSupportArea .meta-board {
+        display: grid;
+        grid-template-columns: 32% 68%;
+        margin: 8px 10px 10px;
+      }
+
+      #printSupportArea .meta-labels,
+      #printSupportArea .meta-values {
+        display: grid;
+      }
+
+      #printSupportArea .meta-label-cell,
+      #printSupportArea .meta-value-cell {
+        min-height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3px 6px;
+        border: 1px solid #000;
+        font-size: 9.5px;
+        font-weight: 700;
+        line-height: 1.15;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      #printSupportArea .meta-label-cell {
+        background: #ffffff;
+        border-right: 0;
+      }
+
+      #printSupportArea .meta-value-cell {
+        background: #a9c4e6;
+      }
+
+      #printSupportArea .table-panel {
+        padding: 0 10px 10px;
+      }
+
+      #printSupportArea table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      #printSupportArea th,
+      #printSupportArea td {
+        border: 1px solid #111;
+        padding: 5px 5px;
+        vertical-align: top;
+        background: #fff;
+        font-size: 9.5px;
+        word-break: break-word;
+      }
+
+      #printSupportArea th {
+        background: #163962;
+        color: #fff;
+        font-weight: 700;
+        text-align: center;
+        text-transform: uppercase;
+      }
+
+      #printSupportArea .col-institution {
+        width: 19%;
+      }
+
+      #printSupportArea .col-feedback {
+        width: 31%;
+      }
+
+      #printSupportArea .col-observation {
+        width: 25%;
+      }
+
+      #printSupportArea .col-lab {
+        width: 25%;
+      }
+
+      #printSupportArea .cell-text {
+        min-height: 96px;
+        white-space: pre-wrap;
+      }
+
+      #printSupportArea .footer {
+        padding: 0 10px 10px;
+        color: #555;
+        font-size: 8.5px;
+        text-align: right;
+      }
+
+      @media print {}
+    </style>
+    <div id="printSupportArea">
+      <main class="sheet-card">
+        <header class="hero">
+          <img src="${escapeHtml(logoUrl)}" alt="Salud e Instituto Nacional de Salud" class="hero-logo" />
+          <h1>Retroalimentación control de calidad de las bases de datos WHONET</h1>
+        </header>
+
+        <section class="meta-board">
+          <div class="meta-labels">
+            <div class="meta-label-cell">Departamento</div>
+            <div class="meta-label-cell">Mes de notificación</div>
+            <div class="meta-label-cell">No. UPGD que notifican</div>
+            <div class="meta-label-cell">Fecha de notificación</div>
+            <div class="meta-label-cell">Oportunidad en el tiempo de notificación</div>
+          </div>
+          <div class="meta-values">
+            <div class="meta-value-cell">${escapeHtml(metadata.departamento || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.mesNotificacion || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.numeroUpgd || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.fechaNotificacion || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.oportunidad || "Sin dato")}</div>
+          </div>
+        </section>
+
+        <section class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-institution">Institución</th>
+                <th class="col-feedback">Retroalimentación de las variables a evaluar</th>
+                <th class="col-observation">Observaciones de las UPGD</th>
+                <th class="col-lab">Observaciones de laboratorio</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${escapeHtml(row.institution || "Sin dato")}</td>
+                <td class="cell-text">${escapeHtml(row.feedback || "Sin información registrada.")}</td>
+                <td class="cell-text">${escapeHtml(row.observation || "Sin información registrada.")}</td>
+                <td class="cell-text">${escapeHtml(row.labResponse || "Sin información registrada.")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="footer">Archivo sugerido: ${escapeHtml(fileName)} | Generado: ${escapeHtml(generatedAt)}</div>
+      </main>
+    </div>
+  `;
+}
+
+function buildPrintableSupportHtml(row, fileName) {
+  const metadata = state.metadata || {};
+  const generatedAt = formatPdfDate(new Date());
+  const logoUrl = new URL("IMAGE/encabezado.png", window.location.href).href;
+
+  return `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8" />
+      <title>${escapeHtml(fileName)}</title>
+      <style>
+        @page {
+          size: letter;
+          margin: 16mm;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
+
+        body {
+          margin: 0;
+          font-family: Arial, sans-serif;
+          background: #fff;
+          color: #111;
+          font-size: 12px;
+          line-height: 1.4;
+        }
+
+        .sheet-card {
+          width: 100%;
+          border: 2px solid #1f3b63;
+        }
+
+        .hero {
+          padding: 12px 16px 8px;
+          background: #fff;
+        }
+
+        .hero-logo {
+          display: block;
+          max-width: 440px;
+          width: 100%;
+          height: auto;
+          margin: 0 auto 10px;
+          object-fit: contain;
+        }
+
+        .hero h1 {
+          margin: 0;
+          font-size: 17px;
+          line-height: 1.25;
+          text-align: center;
+          text-transform: uppercase;
+        }
+
+        .meta-board {
+          display: grid;
+          grid-template-columns: 32% 68%;
+          gap: 0;
+          margin: 10px 16px 12px;
+        }
+
+        .meta-labels,
+        .meta-values {
+          display: grid;
+        }
+
+        .meta-label-cell,
+        .meta-value-cell {
+          min-height: 28px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 4px 8px;
+          border: 1px solid #000;
+          font-size: 11px;
+          line-height: 1.15;
+          text-transform: uppercase;
+          text-align: center;
+        }
+
+        .meta-label-cell {
+          background: #fff;
+          font-weight: 700;
+          border-right: 0;
+        }
+
+        .meta-value-cell {
+          background: #a9c4e6;
+          font-weight: 700;
+        }
+
+        .table-panel {
+          padding: 0 16px 16px;
+        }
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+
+        th,
+        td {
+          border: 1px solid #111;
+          padding: 7px 6px;
+          vertical-align: top;
+          font-size: 11px;
+          background: #fff;
+          word-break: break-word;
+        }
+
+        th {
+          background: #163962;
+          color: #fff;
+          font-weight: 700;
+          text-align: center;
+          text-transform: uppercase;
+        }
+
+        .col-institution {
+          width: 18%;
+        }
+
+        .col-feedback {
+          width: 28%;
+        }
+
+        .col-observation {
+          width: 21%;
+        }
+
+        .col-lab {
+          width: 21%;
+        }
+
+        .col-support {
+          width: 12%;
+        }
+
+        .cell-text {
+          white-space: pre-wrap;
+          min-height: 110px;
+        }
+
+        .footer {
+          padding: 0 16px 14px;
+          color: #555;
+          font-size: 10px;
+          text-align: right;
+        }
+
+        .print-actions {
+          margin: 0 0 14px;
+          text-align: right;
+        }
+
+        .print-actions button {
+          min-height: 36px;
+          padding: 8px 14px;
+          border: 0;
+          border-radius: 6px;
+          background: #163962;
+          color: #fff;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        @media print {
+          .print-actions {
+            display: none;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="print-actions">
+        <button type="button" onclick="window.print()">Guardar como PDF</button>
+      </div>
+
+      <main class="sheet-card">
+        <header class="hero">
+          <img src="${escapeHtml(logoUrl)}" alt="Salud e Instituto Nacional de Salud" class="hero-logo" />
+          <h1>Retroalimentación control de calidad de las bases de datos WHONET</h1>
+        </header>
+
+        <section class="meta-board">
+          <div class="meta-labels">
+            <div class="meta-label-cell">Departamento</div>
+            <div class="meta-label-cell">Mes de notificación</div>
+            <div class="meta-label-cell">No. UPGD que notifican</div>
+            <div class="meta-label-cell">Fecha de notificación</div>
+            <div class="meta-label-cell">Oportunidad en el tiempo de notificación</div>
+          </div>
+          <div class="meta-values">
+            <div class="meta-value-cell">${escapeHtml(metadata.departamento || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.mesNotificacion || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.numeroUpgd || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.fechaNotificacion || "Sin dato")}</div>
+            <div class="meta-value-cell">${escapeHtml(metadata.oportunidad || "Sin dato")}</div>
+          </div>
+        </section>
+
+        <section class="table-panel">
+          <table>
+            <thead>
+              <tr>
+                <th class="col-institution">Institución</th>
+                <th class="col-feedback">Retroalimentación de las variables a evaluar</th>
+                <th class="col-observation">Observaciones de las UPGD</th>
+                <th class="col-lab">Observaciones de laboratorio</th>
+                <th class="col-support">URL soporte</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${escapeHtml(row.institution || "Sin dato")}</td>
+                <td class="cell-text">${escapeHtml(row.feedback || "Sin información registrada.")}</td>
+                <td class="cell-text">${escapeHtml(row.observation || "Sin información registrada.")}</td>
+                <td class="cell-text">${escapeHtml(row.labResponse || "Sin información registrada.")}</td>
+                <td>${escapeHtml(row.supportUrl || "PDF generado desde el formulario")}</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="footer">Archivo sugerido: ${escapeHtml(fileName)} | Generado: ${escapeHtml(generatedAt)}</div>
+      </main>
+      <script>
+        window.addEventListener("load", () => setTimeout(() => window.print(), 250));
+      </script>
+    </body>
+    </html>
+  `;
+}
+
+function normalizePdfText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7E]/g, " ");
+}
+
+function sanitizeFileName(value) {
+  return normalizePdfText(value)
+    .replace(/[<>:"/\\|?*]/g, " ")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "") || "soporte";
+}
+
+function formatPdfDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+function getFieldStatusClass(statusText, value) {
+  if (String(statusText || "").includes("pendientes") || String(statusText || "").includes("Guardando")) {
+    return "pending";
+  }
+
+  return String(value || "").trim() ? "success" : "";
+}
+
+function updateFieldStatus(row, fieldName, className) {
+  const role = fieldName === "labResponse" ? "labResponseStatus" : "observationStatus";
+  const statusNode = els.tablaRetroBody.querySelector(`[data-role="${role}"][data-row-key="${CSS.escape(getRowKey(row))}"]`);
   if (!statusNode) {
     return;
   }
 
-  statusNode.textContent = row.statusText;
+  statusNode.textContent = fieldName === "labResponse" ? row.labResponseStatusText : row.observationStatusText;
   statusNode.className = `row-status ${className || ""}`.trim();
 }
 
@@ -687,7 +1441,7 @@ function toggleReload(disabled) {
 function renderEmpty(message) {
   els.tablaRetroBody.innerHTML = `
     <tr>
-      <td colspan="5" class="empty-state">${escapeHtml(message)}</td>
+      <td colspan="6" class="empty-state">${escapeHtml(message)}</td>
     </tr>
   `;
 }
@@ -706,7 +1460,7 @@ function escapeHtml(text) {
 }
 
 function autoResizeAllTextareas() {
-  els.tablaRetroBody.querySelectorAll(".row-observation").forEach(autoResizeTextarea);
+  els.tablaRetroBody.querySelectorAll(".row-textarea").forEach(autoResizeTextarea);
 }
 
 function autoResizeTextarea(textarea) {

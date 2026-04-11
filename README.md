@@ -6,7 +6,7 @@ Formulario web para revisar la retroalimentacion del INS, escribir observaciones
 
 - `index.html`, `styles.css` y `script.js` forman la interfaz.
 - `data.js` sirve como carga inicial local y funciona aunque abras `index.html` directamente.
-- `Code.gs` sirve para conectar la hoja real de Google Sheets y guardar las observaciones en la columna `C`.
+- `Code.gs` sirve para conectar la hoja real de Google Sheets y guardar las observaciones de las UPGD en la columna `C`, las observaciones de laboratorio en la columna `D` y el soporte en la columna `E`.
 
 ## Conexion con Google Sheets
 
