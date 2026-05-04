@@ -29,6 +29,7 @@ const CONFIG = {
     NOVIEMBRE_2026: "2026-12-15",
     DICIEMBRE_2026: "2027-01-15"
   },
+  
   availableSheets: [
     "ENERO_2026",
     "FEBRERO_2026",
