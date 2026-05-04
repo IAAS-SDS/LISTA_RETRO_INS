@@ -1,5 +1,5 @@
 const CONFIG = {
-  appsScriptUrl: "https://script.google.com/macros/s/AKfycbyReu58CxkqXEiig1cuhF0i2ZVrMn-PPCTtgGxQoXUY7JUx6cQizn0hNj06Es8szoQ/exec",
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbyqjkcbhWoiGCR3yMjH8zwKCpW6dS2uJ7uSak8ikJnTrnGwxVsmmCOgo-9HNp6FVzm2/exec",
   localStorageKey: "retro-ins-observaciones-v1",
   maxUploadSizeMb: 10,
   allowedUploadExtensions: [
@@ -17,7 +17,7 @@ const CONFIG = {
   // Formato: YYYY-MM-DD
   editDeadlines: {
     ENERO_2026: "2026-04-30",
-    FEBRERO_2026: "2026-03-15",
+    FEBRERO_2026: "2026-05-16",
     MARZO_2026: "2026-04-15",
     ABRIL_2026: "2026-05-15",
     MAYO_2026: "2026-06-15",
@@ -114,6 +114,7 @@ async function loadAllData(forceRemoteRefresh = false) {
 
   try {
     const payload = await fetchDataset(forceRemoteRefresh);
+    const isReadOnlyGlobal = Boolean(payload.readOnlyGlobal);
     refreshEditingRules();
     state.metadata = payload.metadata || {};
     state.rows = normalizeRows(payload.rows || []);
@@ -129,6 +130,9 @@ async function loadAllData(forceRemoteRefresh = false) {
     } else if (state.monthNotEnabled) {
       updateAccessBanner(`Correo autorizado: ${state.authorizedEmail}.`);
       setScreenStatus(`Este mes todavia no esta habilitado: ${formatSheetLabel(state.currentSheetName)}.`);
+    } else if (isReadOnlyGlobal) {
+      updateAccessBanner(`Correo autorizado: ${state.authorizedEmail}.`);
+      setScreenStatus(`Acceso global de solo lectura activo. Se cargaron ${state.rows.length} instituciones.`);
     } else if (state.editingLocked) {
       updateAccessBanner(`Correo autorizado: ${state.authorizedEmail}.`);
       setScreenStatus(`Edicion deshabilitada para ${formatSheetLabel(state.currentSheetName)}. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.`);
@@ -220,13 +224,16 @@ function normalizeRows(rows) {
     labResponse: row.labResponse || "",
     supportUrl: row.supportUrl || "",
     supportName: row.supportName || "",
+    canEditObservation: Boolean(row.canEditObservation),
+    canEditLabResponse: Boolean(row.canEditLabResponse),
+    canUploadSupport: row.canUploadSupport !== false && Boolean(row.canEditObservation),
     selectedFileName: "",
     supportMessage: "",
     isSaving: false,
     isUploading: false,
     isGeneratingPdf: false,
-    observationStatusText: getSavedFieldStatusText(row.observation),
-    labResponseStatusText: getSavedFieldStatusText(row.labResponse)
+    observationStatusText: getFieldInitialStatusText("observation", row),
+    labResponseStatusText: getFieldInitialStatusText("labResponse", row)
   }));
 }
 
@@ -268,6 +275,10 @@ function renderRows() {
     const observationStatusClass = getFieldStatusClass(row.observationStatusText, row.observation);
     const labResponseStatusClass = getFieldStatusClass(row.labResponseStatusText, row.labResponse);
     const supportInputId = getSupportInputId(row);
+    const observationDisabled = state.editingLocked || !row.canEditObservation;
+    const labResponseDisabled = state.editingLocked || !row.canEditLabResponse;
+    const supportDisabled = state.editingLocked || !row.canUploadSupport;
+    const saveDisabled = state.editingLocked || row.isSaving || !canSaveRow(row);
 
     return `
       <tr data-row-key="${escapeHtml(getRowKey(row))}">
@@ -278,11 +289,11 @@ function renderRows() {
             class="row-textarea row-observation"
             data-role="observation"
             data-row-key="${escapeHtml(getRowKey(row))}"
-            placeholder="Escribe aqui las observaciones de la UPGD..."
-            ${state.editingLocked ? "disabled" : ""}
+            placeholder="Escribe aqui las observaciones de epidemiologia..."
+            ${observationDisabled ? "disabled" : ""}
           >${escapeHtml(row.observation)}</textarea>
           <div class="row-status ${observationStatusClass}" data-role="observationStatus" data-row-key="${escapeHtml(getRowKey(row))}">
-            ${escapeHtml(state.editingLocked ? `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.` : row.observationStatusText)}
+            ${escapeHtml(getRenderedFieldStatusText(row, "observation"))}
           </div>
         </td>
         <td class="cell-lab-response">
@@ -291,10 +302,10 @@ function renderRows() {
             data-role="labResponse"
             data-row-key="${escapeHtml(getRowKey(row))}"
             placeholder="Escribe aqui las observaciones de laboratorio..."
-            ${state.editingLocked ? "disabled" : ""}
+            ${labResponseDisabled ? "disabled" : ""}
           >${escapeHtml(row.labResponse)}</textarea>
           <div class="row-status ${labResponseStatusClass}" data-role="labResponseStatus" data-row-key="${escapeHtml(getRowKey(row))}">
-            ${escapeHtml(state.editingLocked ? `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.` : row.labResponseStatusText)}
+            ${escapeHtml(getRenderedFieldStatusText(row, "labResponse"))}
           </div>
         </td>
         <td class="cell-support">
@@ -306,10 +317,10 @@ function renderRows() {
               data-role="file"
               data-row-key="${escapeHtml(getRowKey(row))}"
               accept="${escapeHtml(getAllowedExtensionsAccept())}"
-              ${state.editingLocked ? "disabled" : ""}
+              ${supportDisabled ? "disabled" : ""}
             />
             <label
-              class="support-picker ${state.editingLocked ? "support-picker-disabled" : ""}"
+              class="support-picker ${supportDisabled ? "support-picker-disabled" : ""}"
               for="${escapeHtml(supportInputId)}"
             >
               <span class="support-picker-main">Seleccionar archivo</span>
@@ -327,17 +338,17 @@ function renderRows() {
               class="support-button"
               data-role="upload"
               data-row-key="${escapeHtml(getRowKey(row))}"
-              ${row.isUploading || row.isGeneratingPdf || state.editingLocked ? "disabled" : ""}
+              ${row.isUploading || row.isGeneratingPdf || supportDisabled ? "disabled" : ""}
             >${row.isUploading ? "Subiendo..." : "Subir soporte"}</button>
             <button
               type="button"
               class="support-button support-button-secondary"
               data-role="generatePdf"
               data-row-key="${escapeHtml(getRowKey(row))}"
-              ${row.isGeneratingPdf || row.isUploading || state.editingLocked ? "disabled" : ""}
+              ${row.isGeneratingPdf || row.isUploading || supportDisabled ? "disabled" : ""}
             >${row.isGeneratingPdf ? "Generando..." : "Generar PDF"}</button>
             ${row.supportUrl ? `<div class="support-badge">Soporte cargado</div>` : ""}
-            <div class="support-error" data-row-key="${escapeHtml(getRowKey(row))}" style="${row.supportMessage ? "" : "display:none;"}">${escapeHtml(row.supportMessage || "")}</div>
+            <div class="support-error" data-row-key="${escapeHtml(getRowKey(row))}" style="${getSupportMessage(row) ? "" : "display:none;"}">${escapeHtml(getSupportMessage(row))}</div>
           </div>
         </td>
         <td>
@@ -346,7 +357,7 @@ function renderRows() {
             class="save-button"
             data-role="save"
             data-row-key="${escapeHtml(getRowKey(row))}"
-            ${row.isSaving || state.editingLocked ? "disabled" : ""}
+            ${saveDisabled ? "disabled" : ""}
           >${saveLabel}</button>
         </td>
       </tr>
@@ -402,7 +413,7 @@ function bindRowEvents() {
   els.tablaRetroBody.querySelectorAll('[data-role="observation"]').forEach(textarea => {
     textarea.addEventListener("input", event => {
       const row = state.rows.find(item => getRowKey(item) === textarea.dataset.rowKey);
-      if (!row) {
+      if (!row || !row.canEditObservation) {
         return;
       }
 
@@ -417,7 +428,7 @@ function bindRowEvents() {
   els.tablaRetroBody.querySelectorAll('[data-role="labResponse"]').forEach(textarea => {
     textarea.addEventListener("input", event => {
       const row = state.rows.find(item => getRowKey(item) === textarea.dataset.rowKey);
-      if (!row) {
+      if (!row || !row.canEditLabResponse) {
         return;
       }
 
@@ -464,9 +475,18 @@ async function saveRow(rowKey) {
     return;
   }
 
+  if (!canSaveRow(row)) {
+    setScreenStatus("Este correo solo tiene permiso de lectura para esta fila.");
+    return;
+  }
+
   row.isSaving = true;
-  row.observationStatusText = "Guardando cambios...";
-  row.labResponseStatusText = "Guardando cambios...";
+  if (row.canEditObservation) {
+    row.observationStatusText = "Guardando cambios...";
+  }
+  if (row.canEditLabResponse) {
+    row.labResponseStatusText = "Guardando cambios...";
+  }
   syncFilteredRow(row);
   renderRows();
 
@@ -477,12 +497,20 @@ async function saveRow(rowKey) {
       saveObservationLocal(row);
     }
 
-    row.observationStatusText = getSavedFieldStatusText(row.observation);
-    row.labResponseStatusText = getSavedFieldStatusText(row.labResponse);
+    if (row.canEditObservation) {
+      row.observationStatusText = getSavedFieldStatusText(row.observation);
+    }
+    if (row.canEditLabResponse) {
+      row.labResponseStatusText = getSavedFieldStatusText(row.labResponse);
+    }
   } catch (error) {
     console.error("Error guardando observacion:", error);
-    row.observationStatusText = "No se pudo guardar la informacion.";
-    row.labResponseStatusText = "No se pudo guardar la informacion.";
+    if (row.canEditObservation) {
+      row.observationStatusText = "No se pudo guardar la informacion.";
+    }
+    if (row.canEditLabResponse) {
+      row.labResponseStatusText = "No se pudo guardar la informacion.";
+    }
   } finally {
     row.isSaving = false;
     syncFilteredRow(row);
@@ -524,8 +552,8 @@ async function saveObservationRemote(row) {
 function saveObservationLocal(row) {
   const savedMap = getLocalObservationMap();
   savedMap[getRowKey(row)] = {
-    observation: row.observation,
-    labResponse: row.labResponse
+    observation: row.canEditObservation ? row.observation : "",
+    labResponse: row.canEditLabResponse ? row.labResponse : ""
   };
   localStorage.setItem(getLocalStorageKey(), JSON.stringify(savedMap));
 }
@@ -557,6 +585,13 @@ async function uploadSupport(rowKey) {
 
   const row = state.rows.find(item => getRowKey(item) === rowKey);
   if (!row) {
+    return;
+  }
+
+  if (!row.canUploadSupport) {
+    row.supportMessage = "Solo el correo autorizado por UPGD puede cargar soportes.";
+    syncFilteredRow(row);
+    updateSupportUi(row);
     return;
   }
 
@@ -708,6 +743,53 @@ function formatDeadlineForDisplay(deadline) {
 
 function getSavedFieldStatusText(value) {
   return String(value || "").trim() ? "Informacion cargada." : "Sin informacion registrada.";
+}
+
+function getFieldInitialStatusText(fieldName, row) {
+  if (!canEditField(row, fieldName)) {
+    return getReadOnlyFieldStatusText(fieldName);
+  }
+
+  const value = fieldName === "labResponse" ? row.labResponse : row.observation;
+  return getSavedFieldStatusText(value);
+}
+
+function getRenderedFieldStatusText(row, fieldName) {
+  if (state.editingLocked) {
+    return `Edicion cerrada. Fecha limite: ${formatDeadlineForDisplay(state.activeDeadline)}.`;
+  }
+
+  if (!canEditField(row, fieldName)) {
+    return getReadOnlyFieldStatusText(fieldName);
+  }
+
+  return fieldName === "labResponse" ? row.labResponseStatusText : row.observationStatusText;
+}
+
+function getReadOnlyFieldStatusText(fieldName) {
+  return fieldName === "labResponse"
+    ? "Solo lectura. Este campo lo edita laboratorio."
+    : "Solo lectura. Este campo lo edita la UPGD.";
+}
+
+function canEditField(row, fieldName) {
+  return fieldName === "labResponse" ? row.canEditLabResponse : row.canEditObservation;
+}
+
+function canSaveRow(row) {
+  return Boolean(row && (row.canEditObservation || row.canEditLabResponse));
+}
+
+function getSupportMessage(row) {
+  if (row.supportMessage) {
+    return row.supportMessage;
+  }
+
+  if (!state.editingLocked && !row.canUploadSupport) {
+    return "Solo el correo autorizado por UPGD puede cargar soportes.";
+  }
+
+  return "";
 }
 
 async function generatePdfSupport(rowKey) {
@@ -863,7 +945,7 @@ function drawFeedbackTable(doc, row, x, y, width, bottomLimit) {
   const columns = [
     { title: "INSTITUCIÓN", value: row.institution || "Sin dato", width: width * 0.19 },
     { title: "RETROALIMENTACIÓN DE LAS VARIABLES A EVALUAR", value: row.feedback || "Sin información registrada.", width: width * 0.31 },
-    { title: "OBSERVACIONES DE LAS UPGD", value: row.observation || "Sin información registrada.", width: width * 0.25 },
+    { title: "OBSERVACIONES DE EPIDEMIOLOGIA", value: row.observation || "Sin información registrada.", width: width * 0.25 },
     { title: "OBSERVACIONES DE LABORATORIO", value: row.labResponse || "Sin información registrada.", width: width * 0.25 }
   ];
   const headerHeight = 28;
@@ -1119,7 +1201,7 @@ function buildPrintableSupportMarkup(row, fileName) {
               <tr>
                 <th class="col-institution">Institución</th>
                 <th class="col-feedback">Retroalimentación de las variables a evaluar</th>
-                <th class="col-observation">Observaciones de las UPGD</th>
+                <th class="col-observation">Observaciones de epidemiologia</th>
                 <th class="col-lab">Observaciones de laboratorio</th>
               </tr>
             </thead>
@@ -1351,7 +1433,7 @@ function buildPrintableSupportHtml(row, fileName) {
               <tr>
                 <th class="col-institution">Institución</th>
                 <th class="col-feedback">Retroalimentación de las variables a evaluar</th>
-                <th class="col-observation">Observaciones de las UPGD</th>
+                <th class="col-observation">Observaciones de epidemiologia</th>
                 <th class="col-lab">Observaciones de laboratorio</th>
                 <th class="col-support">URL soporte</th>
               </tr>
@@ -1403,6 +1485,10 @@ function formatPdfDate(date) {
 }
 
 function getFieldStatusClass(statusText, value) {
+  if (String(statusText || "").includes("Solo lectura")) {
+    return "";
+  }
+
   if (String(statusText || "").includes("pendientes") || String(statusText || "").includes("Guardando")) {
     return "pending";
   }
@@ -1477,8 +1563,9 @@ function updateSupportUi(row) {
 
   const errorNode = els.tablaRetroBody.querySelector(`.support-error[data-row-key="${CSS.escape(rowKey)}"]`);
   if (errorNode) {
-    errorNode.textContent = row.supportMessage || "";
-    errorNode.style.display = row.supportMessage ? "block" : "none";
+    const message = getSupportMessage(row);
+    errorNode.textContent = message;
+    errorNode.style.display = message ? "block" : "none";
   }
 }
 

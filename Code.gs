@@ -40,6 +40,10 @@ const ADMIN_EMAILS = [
   "infeccionesasociadassaludiaas@gmail.com"
 ];
 
+const READ_ONLY_GLOBAL_EMAILS = [
+  "talentopic@saludcapital.gov.co"
+];
+
 function getSheetName_(sheetName) {
   const cleaned = String(sheetName || "").trim();
   return cleaned || DEFAULT_SHEET_NAME;
@@ -115,10 +119,31 @@ function saveObservation_(payload) {
     throw new Error("Numero de fila no valido.");
   }
 
-  assertRowEmailAuthorized_(sheet, rowNumber, email);
+  const permissions = getRowPermissions_(sheet, rowNumber, email);
+  if (!permissions.canEditObservation && !permissions.canEditLabResponse) {
+    throw new Error("El correo no tiene permiso para modificar esta institucion.");
+  }
 
-  sheet.getRange(rowNumber, 3).setValue(payload.observation || "");
-  sheet.getRange(rowNumber, 4).setValue(payload.labResponse || "");
+  const currentObservation = sheet.getRange(rowNumber, 3).getDisplayValue();
+  const currentLabResponse = sheet.getRange(rowNumber, 4).getDisplayValue();
+  const nextObservation = payload.observation || "";
+  const nextLabResponse = payload.labResponse || "";
+
+  if (!permissions.canEditObservation && nextObservation !== currentObservation) {
+    throw new Error("El correo no tiene permiso para editar las observaciones de la UPGD.");
+  }
+
+  if (!permissions.canEditLabResponse && nextLabResponse !== currentLabResponse) {
+    throw new Error("El correo no tiene permiso para editar las observaciones de laboratorio.");
+  }
+
+  if (permissions.canEditObservation) {
+    sheet.getRange(rowNumber, 3).setValue(nextObservation);
+  }
+
+  if (permissions.canEditLabResponse) {
+    sheet.getRange(rowNumber, 4).setValue(nextLabResponse);
+  }
 
   return jsonOutput({
     success: true,
@@ -146,7 +171,7 @@ function uploadSupport_(payload) {
     throw new Error("No se recibio el archivo.");
   }
 
-  assertRowEmailAuthorized_(sheet, rowNumber, email);
+  assertRowPermission_(sheet, rowNumber, email, "support");
   validateUploadExtension_(fileName);
 
   const monthFolder = getMonthFolder_(sheetName);
@@ -179,29 +204,53 @@ function buildDataset_(sheetName, email) {
   const totalRows = Math.max(lastRow - DATA_START_ROW + 1, 0);
 
   const values = totalRows > 0
-    ? sheet.getRange(DATA_START_ROW, 1, totalRows, 6).getDisplayValues()
+    ? sheet.getRange(DATA_START_ROW, 1, totalRows, 8).getDisplayValues()
     : [];
 
   const normalizedEmail = normalizeEmail_(email);
   const isAdmin = isAdminEmail_(normalizedEmail);
+  const isReadOnlyGlobal = isReadOnlyGlobalEmail_(normalizedEmail);
 
   const baseRows = values
-    .map((row, index) => ({
-      rowNumber: DATA_START_ROW + index,
-      institution: row[0] || "",
-      feedback: row[1] || "",
-      observation: row[2] || "",
-      labResponse: row[3] || "",
-      supportUrl: row[4] || "",
-      supportName: row[4] ? "Soporte cargado" : "",
-      authorizedEmail: row[5] || ""
-    }))
-    .filter(row => row.institution || row.feedback || row.observation || row.labResponse || row.supportUrl || row.authorizedEmail);
+    .map((row, index) => {
+      const canEditObservation = isAdmin || isAuthorizedForRow_(row[5], normalizedEmail);
+      const canEditLabResponse = isAdmin || isAuthorizedForLabRow_(row[5], row[6], normalizedEmail);
+      const canViewSupervisor = isAdmin || isReadOnlyGlobal || isAuthorizedForRow_(row[7], normalizedEmail);
+
+      return {
+        rowNumber: DATA_START_ROW + index,
+        institution: row[0] || "",
+        feedback: row[1] || "",
+        observation: row[2] || "",
+        labResponse: row[3] || "",
+        supportUrl: row[4] || "",
+        supportName: row[4] ? "Soporte cargado" : "",
+        authorizedEmail: row[5] || "",
+        labAuthorizedEmail: row[6] || "",
+        supervisorAuthorizedEmail: row[7] || "",
+        canEditObservation,
+        canEditLabResponse,
+        canUploadSupport: canEditObservation,
+        canViewSupervisor
+      };
+    })
+    .filter(row => (
+      row.institution ||
+      row.feedback ||
+      row.observation ||
+      row.labResponse ||
+      row.supportUrl ||
+      row.authorizedEmail ||
+      row.labAuthorizedEmail ||
+      row.supervisorAuthorizedEmail
+    ));
 
   const rows = isAdmin
     ? baseRows
+    : isReadOnlyGlobal
+      ? baseRows
     : normalizedEmail
-      ? baseRows.filter(row => isAuthorizedForRow_(row.authorizedEmail, normalizedEmail))
+      ? baseRows.filter(row => row.canEditObservation || row.canEditLabResponse || row.canViewSupervisor)
       : baseRows;
 
   if (normalizedEmail && !isAdmin && rows.length === 0) {
@@ -217,6 +266,7 @@ function buildDataset_(sheetName, email) {
         fechaNotificacion: sheet.getRange(META_MAP.fechaNotificacion).getDisplayValue(),
         oportunidad: sheet.getRange(META_MAP.oportunidad).getDisplayValue()
       },
+      readOnlyGlobal: false,
       rows: []
     };
   }
@@ -232,6 +282,7 @@ function buildDataset_(sheetName, email) {
       fechaNotificacion: sheet.getRange(META_MAP.fechaNotificacion).getDisplayValue(),
       oportunidad: sheet.getRange(META_MAP.oportunidad).getDisplayValue()
     },
+    readOnlyGlobal: isReadOnlyGlobal,
     rows
   };
 }
@@ -254,6 +305,17 @@ function validateEmailAccess_(email) {
       email: normalizedEmail,
       sheets: getSpreadsheet_().getSheets().map(sheet => sheet.getName()),
       isAdmin: true
+    };
+  }
+
+  if (isReadOnlyGlobalEmail_(normalizedEmail)) {
+    return {
+      success: true,
+      accessGranted: true,
+      message: "Correo autorizado con acceso global de solo lectura.",
+      email: normalizedEmail,
+      sheets: getSpreadsheet_().getSheets().map(sheet => sheet.getName()),
+      isReadOnlyGlobal: true
     };
   }
 
@@ -285,20 +347,51 @@ function validateEmailAccess_(email) {
   };
 }
 
-function assertRowEmailAuthorized_(sheet, rowNumber, email) {
+function assertRowPermission_(sheet, rowNumber, email, permissionType) {
   const normalizedEmail = normalizeEmail_(email);
   if (!normalizedEmail) {
     throw new Error("No se recibio un correo autorizado.");
   }
 
-  if (isAdminEmail_(normalizedEmail)) {
+  const permissions = getRowPermissions_(sheet, rowNumber, normalizedEmail);
+  const isAllowed = permissionType === "labResponse"
+    ? permissions.canEditLabResponse
+    : permissions.canEditObservation;
+
+  if (isAllowed) {
     return;
   }
 
-  const authorizedCell = sheet.getRange(rowNumber, 6).getDisplayValue();
-  if (!isAuthorizedForRow_(authorizedCell, normalizedEmail)) {
-    throw new Error("El correo no tiene permiso para modificar esta institucion.");
+  if (permissionType === "labResponse") {
+    throw new Error("El correo no tiene permiso para editar las observaciones de laboratorio.");
   }
+
+  throw new Error("El correo no tiene permiso para modificar esta institucion.");
+}
+
+function getRowPermissions_(sheet, rowNumber, email) {
+  const normalizedEmail = normalizeEmail_(email);
+  if (!normalizedEmail) {
+    return {
+      canEditObservation: false,
+      canEditLabResponse: false
+    };
+  }
+
+  if (isAdminEmail_(normalizedEmail)) {
+    return {
+      canEditObservation: true,
+      canEditLabResponse: true
+    };
+  }
+
+  const authorizedCell = sheet.getRange(rowNumber, 6).getDisplayValue();
+  const labAuthorizedCell = sheet.getRange(rowNumber, 7).getDisplayValue();
+
+  return {
+    canEditObservation: isAuthorizedForRow_(authorizedCell, normalizedEmail),
+    canEditLabResponse: isAuthorizedForLabRow_(authorizedCell, labAuthorizedCell, normalizedEmail)
+  };
 }
 
 function isAuthorizedForRow_(authorizedCell, email) {
@@ -307,17 +400,34 @@ function isAuthorizedForRow_(authorizedCell, email) {
     return false;
   }
 
-  const options = String(authorizedCell || "")
+  const options = getAuthorizedOptions_(authorizedCell);
+  return options.includes(normalizedEmail);
+}
+
+function isAuthorizedForLabRow_(upgdAuthorizedCell, labAuthorizedCell, email) {
+  const labOptions = getAuthorizedOptions_(labAuthorizedCell);
+  if (labOptions.length > 0) {
+    return labOptions.includes(normalizeEmail_(email));
+  }
+
+  return isAuthorizedForRow_(upgdAuthorizedCell, email);
+}
+
+function getAuthorizedOptions_(authorizedCell) {
+  return String(authorizedCell || "")
     .split(/[,;\n]/)
     .map(item => normalizeEmail_(item))
     .filter(item => item && item !== "-" && item !== "--" && item !== "---" && item !== "-----------");
-
-  return options.includes(normalizedEmail);
 }
 
 function isAdminEmail_(email) {
   const normalizedEmail = normalizeEmail_(email);
   return ADMIN_EMAILS.includes(normalizedEmail);
+}
+
+function isReadOnlyGlobalEmail_(email) {
+  const normalizedEmail = normalizeEmail_(email);
+  return READ_ONLY_GLOBAL_EMAILS.includes(normalizedEmail);
 }
 
 function normalizeEmail_(value) {
