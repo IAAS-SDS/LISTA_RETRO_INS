@@ -16,8 +16,8 @@ const CONFIG = {
   // Configura aqui hasta que fecha se puede editar cada hoja.
   // Formato: YYYY-MM-DD
   editDeadlines: {
-    ENERO_2026: "2026-05-05",
-    FEBRERO_2026: "2026-05-16",
+    ENERO_2026: "2026-05-20",
+    FEBRERO_2026: "2026-05-20",
     MARZO_2026: "2026-04-15",
     ABRIL_2026: "2026-05-15",
     MAYO_2026: "2026-06-15",
